@@ -1,0 +1,7 @@
+-LLM-Recommenders contains the methods used to implement and benchmark the performance of GPT4o and GPT4o Mini,
+including the required preprocessing of the Movielens1M dataset.
+
+-RAG-LLM recommender contains the methods used to implement and benchmark the performance of our RAG recommender system
+with both GPT4o GPT4o mini, including the required preprocessing of the Movielens1M dataset.
+
+-The embedding model used is: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2, it is already pertained using the loss function mentioned in the paper. 
