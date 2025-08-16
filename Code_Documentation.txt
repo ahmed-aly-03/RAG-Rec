@@ -1,0 +1,189 @@
+
+RAG-Rec Notebook Workflows (Exact Function Names)
+Updated: 2025-08-16 07:26:27
+
+This document describes how to reproduce results from the notebook `RAG_LLM_Recommender_System.ipynb`
+using the SAME function names and flow that appear in the notebook.
+
+============================================================
+PREREQUISITES
+============================================================
+- Files:
+  - ratings.dat  (format: UserID::MovieID::Rating::Timestamp)
+  - movies.dat   (format: MovieID::Title::Genres)
+- Python packages:
+  - pandas, numpy, scikit-learn, sentence-transformers, openai, re, ast
+- GPU recommended for SentenceTransformer('all-MiniLM-L6-v2') (device='cuda').
+
+============================================================
+KEY FUNCTIONS PRESENT IN THE NOTEBOOK
+============================================================
+- Data/Subsets:
+  - create_embed_test_subsets_ML1M(ratings_fp, movies_fp)
+  - get_ground_truth(ratings_fp, movies_fp)
+  - get_all_subsets(ratings_fp, movies_fp)
+
+- Embeddings/Retrieval:
+  - normalize_embeddings(x)
+  - generate_embedding(df)
+  - get_similar_users(df, norm_embeddings, user_ids, top_k)
+  - retrieve_similar_user_movies(df, user_id)
+  - clean_similar_user_movies(similar_user_history)
+  - get_similar_movies(top_similar_user_vectors, embed_set)
+  - retriever(df, norm_embeddings, user_ids, embed_set, top_k=2)   # NOTE: function name intentionally spelled 'retriever'
+
+- Prompting/Generation:
+  - generate_prompt(retriever_output, num_users, k=None)
+  - generate_recs_GPT4o(input_prompts, api_key)
+  - generate_recs_mini(input_prompts, api_key)
+  - clean_LLM_output(LLM_recs)
+
+- Evaluation:
+  - calc_metrics_LLM(cleaned_LLM_recs, retriever_out)            # NOTE: function name intentionally 'metrcics'
+  - calc_hit_rate_LLM(cleaned_LLM_recs, retriever_out, k)
+  - calc_hit_ratek_LLM(cleaned_LLM_recs, retriever_output, k_arr)
+  - calc_metrics_RAG(retriever_output)
+  - calc_hit_rate_RAG(retriever_output, k)
+  - calc_hit_ratek_RAG(retriever_output, k_arr)
+
+============================================================
+WORKFLOW A: Build Subsets and Ground Truth
+============================================================
+# PSEUDO-CODE
+ratings_fp = "path/to/ratings.dat"
+movies_fp  = "path/to/movies.dat"
+
+# 1) Build the embedding (train) users and test users
+embed_set, test_set = create_embed_test_subsets_ML1M(ratings_fp, movies_fp)
+
+# 2) (Optional) Build ground truth dict for all users
+ground_truth = get_ground_truth(ratings_fp, movies_fp)
+
+# 3) (Optional) One-call helper to get all three
+embed_set, test_set, ground_truth = get_all_subsets(ratings_fp, movies_fp)
+
+
+============================================================
+WORKFLOW B: Compute Embeddings for EMBED SET (Train Users)
+============================================================
+# PSEUDO-CODE
+# 1) Compute sentence embeddings for each 'user rating history' in embed_set
+norm_embeddings, user_ids = generate_embedding(embed_set)
+#    - uses SentenceTransformer('all-MiniLM-L6-v2', device='cuda')
+#    - normalize_embeddings() is applied internally to return L2-normalized vectors
+
+
+============================================================
+WORKFLOW C: Retrieve Similar-User Movies for TEST SET (RAG-Rec)
+============================================================
+# PSEUDO-CODE
+# 1) For each user in test_set, find top-K similar users (by cosine similarity)
+top_k = 5
+retriever_output = retriever(
+    df=test_set,
+    norm_embeddings=norm_embeddings,
+    user_ids=user_ids,
+    embed_set=embed_set,
+    top_k=top_k,
+)
+# retriever_output is a list of dicts:
+#   {
+#     'user vector': 'User#X has liked:\nTitle1\nTitle2\n...',
+#     'similar_movies': {TitleA, TitleB, ...}    # union of similar users' liked movies
+#   }
+
+
+============================================================
+WORKFLOW D: Build Prompts for LLM from User + Similar-User Movies
+============================================================
+# PSEUDO-CODE
+# 1) For up to N users, create an LLM prompt that includes:
+#    - up to the first 20 movies from the user's own history
+#    - a list of movies from similar users (retriever_output[i]['similar_movies'])
+num_users = 50
+k = None  # or set an integer to force exactly k recs in the system instruction
+prompts = generate_prompt(retriever_output, num_users=num_users, k=k)
+# prompts is a list of OpenAI-style messages [[{role, content}, ...], ...]
+
+
+============================================================
+WORKFLOW E: Generate Recommendations with LLM
+============================================================
+# PSEUDO-CODE
+api_key = "YOUR_OPENAI_API_KEY"
+
+# Option 1: GPT-4o
+gpt4o_outputs = generate_recs_GPT4o(prompts, api_key)
+
+# Option 2: GPT-4o mini
+gpt4o_mini_outputs = generate_recs_mini(prompts, api_key)
+
+# The raw model outputs are strings that should contain a fenced JSON block.
+# Example expected pattern inside:
+# ```json
+# ["Movie 1", "Movie 2", ...]
+# ```
+
+
+============================================================
+WORKFLOW F: Clean LLM Outputs (Extract JSON Arrays)
+============================================================
+# PSEUDO-CODE
+cleaned_recs = clean_LLM_output(gpt4o_outputs)
+# cleaned_recs is a list of JSON strings like '["Movie 1", "Movie 2", ...]'
+
+
+============================================================
+WORKFLOW G: Evaluate LLM-on-Top (RAG-Rec + LLM)
+============================================================
+# PSEUDO-CODE
+# 1) Core metrics (precision/recall/F1) comparing the LLM's recs to the user's own 'user vector'
+llm_metrics = calc_metrics_LLM(cleaned_recs, retriever_output)
+# Returns a dict: {'precision:': float, 'recall:': float, 'F1_Score': float}
+
+# 2) Hit Rate @ k (multiple k)
+k_values = [10, 20, 30]
+llm_hit_rate_k = calc_hit_ratek_LLM(cleaned_recs, retriever_output, k_values)
+# Returns a dict mapping each k to the hit-rate value
+
+
+============================================================
+WORKFLOW H: Evaluate Retriever-Only Baseline (RAG-Rec)
+============================================================
+# PSEUDO-CODE
+# 1) Core metrics (precision/recall/F1) comparing retrieved movies to the user's own 'user vector'
+rag_metrics = calc_metrics_RAG(retriever_output)
+
+# 2) Hit Rate @ k (multiple k)
+k_values = [10, 20, 30]
+rag_hit_rate_k = calc_hit_ratek_RAG(retriever_output, k_values)
+
+
+============================================================
+REPRODUCIBILITY & CACHING (RECOMMENDED)
+============================================================
+# PSEUDO-CODE
+# Cache subsets for later reuse
+embed_set.to_csv("embed_set.csv", index=False)
+test_set.to_csv("test_set.csv", index=False)
+
+# Cache embeddings to avoid recompute
+import numpy as np, json
+np.save("embed_norm_embeddings.npy", norm_embeddings)
+with open("embed_user_ids.json", "w") as f:
+    json.dump(user_ids, f)
+
+# Load caches later
+norm_embeddings = np.load("embed_norm_embeddings.npy")
+import json
+with open("embed_user_ids.json") as f:
+    user_ids = json.load(f)
+
+
+============================================================
+TIPS
+============================================================
+- Ensure the LLM system message explicitly asks for a fenced JSON array (```json ... ```).
+- The notebook’s evaluation compares rec lists with the movies in each user's 'user vector'.
+- If your GPU is unavailable, SentenceTransformer will fall back to CPU; expect slower encoding.
+- Keep train_test_split(random_state=42) for reproducible embed/test splits.
