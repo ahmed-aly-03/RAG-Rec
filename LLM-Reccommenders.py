@@ -7,6 +7,8 @@ from openai import OpenAI
 from collections import defaultdict
 
 def create_test_set(ratings_fp, movies_fp):
+  #Input: File paths to the movie lens ratings.dat and movie .dat files
+  #Output: the set of users to test the model on 
   user_ratings = pd.read_csv(ratings_fp, usecols = [0,1,2], sep='::', names=['user_id', 'movie_id', 'rating'], engine='python')
   movie_names = pd.read_csv(movies_fp, usecols = [0,1], sep='::', names= ['movie_id', 'title'],engine='python', encoding = 'latin1')
   user_ratings = user_ratings.merge(movie_names, on='movie_id')
@@ -19,6 +21,8 @@ def create_test_set(ratings_fp, movies_fp):
   return test_set
 
 def create_prompt(test_set, num_users):
+  #Input: Test set output from create_test_set() and the number of user desired to test the model on (test_set.length))
+  #Output: Array with prompts ready to input into the model
   LLM_input = []
   for index,row in enumerate(test_set.iterrows()):
     if index >= num_users:
@@ -33,6 +37,8 @@ def create_prompt(test_set, num_users):
   return LLM_input
 
 def generate_recs_GPT4o(input_prompts, api_key):
+  #Input: Arr of prompts (output of create_prompts()), and gpt api key
+  #Output: recs for GPT4o model
   client = OpenAI(api_key=api_key)
   gpt_recs = []
   num_prompts = len(input_prompts)
@@ -42,7 +48,9 @@ def generate_recs_GPT4o(input_prompts, api_key):
     gpt_recs.append(response.output_text)
   return gpt_recs
 
-def generate_recs_o4_mini(input_prompts, api_key):
+def generate_recs_mini(input_prompts, api_key):
+  #Input: Arr of prompts (output of create_prompts()), and gpt api key
+  #output: recs for GPT4o mini model
   client = OpenAI(api_key=api_key)
   o4_mini_recs = []
   num_prompts = len(input_prompts)
@@ -53,6 +61,8 @@ def generate_recs_o4_mini(input_prompts, api_key):
   return o4_mini_recs
 
 def clean_LLM_output(LLM_recs):
+  #Input: Generated recs from the LLM
+  #Output: Cleaned recs
   cleaned_recs = []
   for rec in LLM_recs:
     code_block = re.search(r"```json\s*(.*?)```", rec, re.DOTALL)
@@ -61,6 +71,8 @@ def clean_LLM_output(LLM_recs):
   return cleaned_recs
 
 def calc_metrics(cleaned_LLM_recs,test_set):
+  #Input: arr of cleaned LLM output (output of clean_LLM_output()), test set to retrieve ground truth () (output of create_test_set())
+  #Output: dic with the precision, recall and f-score for inputted test_set
   precision_arr = []
   recall_arr = []
   f1_score_arr = []
@@ -82,6 +94,8 @@ def calc_metrics(cleaned_LLM_recs,test_set):
   return {'precision:': precision_mean, 'recall:': recall_mean, 'F1_Score': f1_score_mean}
 
 def calc_hit_rate(cleaned_LLM_recs,test_set,k):
+  #Input: arr of cleaned LLM output (output of clean_LLM_output()), test set to retrieve ground truth (output of create_test_set()), k: top k user to calculate hit rate for
+  #Output:Hit rate at k
   sum = 0
   for i,rec in enumerate(cleaned_LLM_recs):
     predicted_results = ast.literal_eval(rec)[:k]
@@ -92,6 +106,8 @@ def calc_hit_rate(cleaned_LLM_recs,test_set,k):
   return sum/len(cleaned_LLM_recs)
 
 def calc_hit_ratek_LLM(cleaned_LLM_recs, test_set,k_arr):
+  #wrapper for calc_hit_rate, Input: K_arr (array with value to calculate hitrate@k for)
+  #Ouput: Dic with hit rate 
   hit_rate_k = defaultdict(float)
   for k in k_arr:
     hit_rate_k[k] = calc_hit_rate(cleaned_LLM_recs,test_set,k)
