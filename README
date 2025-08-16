@@ -6,4 +6,6 @@ with both GPT4o GPT4o mini, including the required preprocessing of the Movielen
 
 -The embedding model used is: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2, it is already pertained using the loss function mentioned in the paper. 
 
+-Link to Movielens1M dataset: https://grouplens.org/datasets/movielens/1m/
+
 -You will need a GPT API key for the code to run.
