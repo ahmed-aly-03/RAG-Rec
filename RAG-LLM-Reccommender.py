@@ -8,6 +8,8 @@ import ast
 from openai import OpenAI
 
 def create_embed_test_subsets_ML1M(ratings_fp, movies_fp):
+  #Input: File paths to the movie lens ratings.dat and movies.dat files
+  #Output: embed_set (training users) and test_set (evaluation users)
   user_ratings = pd.read_csv(ratings_fp, usecols = [0,1,2], sep='::', names=['user_id', 'movie_id', 'rating'], engine='python')
   movie_names = pd.read_csv(movies_fp, usecols = [0,1], sep='::', names= ['movie_id', 'title'],engine='python', encoding = 'latin1')
   user_ratings = user_ratings.merge(movie_names, on='movie_id')
@@ -20,6 +22,8 @@ def create_embed_test_subsets_ML1M(ratings_fp, movies_fp):
   return embed_set, test_set
 
 def get_ground_truth(ratings_fp, movies_fp):
+  #Input: File paths to ratings.dat and movies.dat
+  #Output: Dictionary {user_id: [list of liked movies]}
   user_ratings = pd.read_csv(ratings_fp, usecols = [0,1,2], sep='::', names=['user_id', 'movie_id', 'rating'],
                              engine='python')
   movie_names = pd.read_csv(movies_fp, usecols = [0,1], sep='::', names= ['movie_id', 'title'],
@@ -31,14 +35,20 @@ def get_ground_truth(ratings_fp, movies_fp):
   return {row['user_id']: row['ground_truth'] for _, row in user_ratings.iterrows()}
 
 def get_all_subsets(rating_fp, movies_fp):
+  #Input: File paths for ratings.dat and movies.dat
+  #Output: embed_set, test_set, ground_truth dict
   embed_set, test_set = create_embed_test_subsets_ML1M(rating_fp, movies_fp)
   ground_truth = get_ground_truth(rating_fp, movies_fp)
   return embed_set, test_set, ground_truth
 
 def normalize_embeddings(x):
+  #Input: Array of embeddings
+  #Output: Normalized embeddings (L2 norm)
   return x/np.linalg.norm(x, axis=1, keepdims=True)
 
 def generate_embedding(df):
+  #Input: DataFrame with user rating history
+  #Output: Normalized embeddings and user_id list
   embedding_model = SentenceTransformer('all-MiniLM-L6-v2',device = 'cuda')
   embeddings = []
   for _,row in df.iterrows():
@@ -49,6 +59,8 @@ def generate_embedding(df):
   return normalized_embeddings,df['user_id'].tolist()
 
 def get_similar_users(df, norm_embeddings, user_ids, top_k):
+  #Input: df (user rating histories), normalized embeddings, user_ids, top_k
+  #Output: List of dicts with user vector and top similar user IDs
   results = []
   test_users,_ = generate_embedding(df)
   for j, user_vector in enumerate(test_users):
@@ -59,16 +71,22 @@ def get_similar_users(df, norm_embeddings, user_ids, top_k):
   return results
 
 def retrieve_similar_user_movies(df, user_id):
+  #Input: DataFrame with user rating history, user_id
+  #Output: The rating history string for that user
   user_rating_lookup = dict(zip(df['user_id'], df['user rating history']))
   user_rating_history = user_rating_lookup.get(user_id)
   return user_rating_history
 
 def clean_similar_user_movies(similar_user_history):
-    _, movies_str = similar_user_history.split(" has liked:\n")
-    movies = movies_str.strip().split("\n")
-    return movies
+  #Input: User rating history string
+  #Output: List of movie titles
+  _, movies_str = similar_user_history.split(" has liked:\n")
+  movies = movies_str.strip().split("\n")
+  return movies
 
 def get_similar_movies(top_similar_user_vectors, embed_set):
+  #Input: top_similar_user_vectors, embed_set
+  #Output: Dict with user vector and union of similar users’ movies
   similar_movies = []
   for dic in top_similar_user_vectors:
     similar_user_movies = set()
@@ -79,15 +97,18 @@ def get_similar_movies(top_similar_user_vectors, embed_set):
     similar_movies.append({'user vector': dic['user vector'], 'similar_movies': similar_user_movies})
   return similar_movies
 
-def retriver (df, norm_embeddings, user_ids, embed_set, top_k = 2):
-  embedding_model = SentenceTransformer('all-MiniLM-L6-v2',device = 'cuda')
+def retriever(df, norm_embeddings, user_ids, embed_set, top_k = 2):
+  #Input: Test df, normalized embeddings, user_ids, embed_set, top_k
+  #Output: Retriever output (similar users’ movies per user)
   top_similar_user_vectors = get_similar_users(df, norm_embeddings, user_ids, top_k)
-  retriver_output = get_similar_movies(top_similar_user_vectors, embed_set)
-  return retriver_output
+  retriever_output = get_similar_movies(top_similar_user_vectors, embed_set)
+  return retriever_output
 
-def generate_prompt(retriver_output, num_users, k = None):
+def generate_prompt(retriever_output, num_users, k = None):
+  #Input: retriever_output, number of users to generate prompts for, optional k
+  #Output: LLM prompt array
   LLM_input = []
-  for index, dic in enumerate(retriver_output):
+  for index, dic in enumerate(retriever_output):
     if index >= num_users:
       break
     movie_lines = dic['user vector'].splitlines()[1:]
@@ -108,6 +129,8 @@ def generate_prompt(retriver_output, num_users, k = None):
   return LLM_input
 
 def generate_recs_GPT4o(input_prompts, api_key):
+  #Input: Prompts array, OpenAI API key
+  #Output: GPT-4o generated recs
   client = OpenAI(api_key=api_key)
   gpt_recs = []
   num_prompts = len(input_prompts)
@@ -117,7 +140,9 @@ def generate_recs_GPT4o(input_prompts, api_key):
     gpt_recs.append(response.output_text)
   return gpt_recs
 
-def generate_recs_4o_mini(input_prompts, api_key):
+def generate_recs_mini(input_prompts, api_key):
+  #Input: Prompts array, OpenAI API key
+  #Output: GPT-4o mini generated recs
   client = OpenAI(api_key=api_key)
   o4_mini_recs = []
   num_prompts = len(input_prompts)
@@ -128,6 +153,8 @@ def generate_recs_4o_mini(input_prompts, api_key):
   return o4_mini_recs
 
 def clean_LLM_output(LLM_recs):
+  #Input: Generated recs from LLM
+  #Output: Cleaned JSON text outputs
   cleaned_recs = []
   for rec in LLM_recs:
     code_block = re.search(r"```json\s*(.*?)```", rec, re.DOTALL)
@@ -135,64 +162,76 @@ def clean_LLM_output(LLM_recs):
     cleaned_recs.append(json_text)
   return cleaned_recs
 
-def calc_metrcics_LLM(cleaned_LLM_recs,retriver_out):
-  precicsion_arr = []
+def calc_metrics_LLM(cleaned_LLM_recs, retriever_output):
+  #Input: Cleaned LLM recs, retriever output
+  #Output: Precision, recall, F1-score dictionary
+  precision_arr = []
   recall_arr = []
   f1_score_arr = []
   for i,rec in enumerate(cleaned_LLM_recs):
     predicted_results = ast.literal_eval(rec)
-    ground_truth = retriver_out[i]['user vector'].splitlines()
+    ground_truth = retriever_output[i]['user vector'].splitlines()
     tp = len(set(predicted_results) & set(ground_truth))
     fp = len(set(predicted_results) - set(ground_truth))
     fn = len(set(ground_truth) - set(predicted_results))
     precision = tp / (tp + fp) if tp + fp > 0 else 0
     recall = tp / (tp + fn) if tp + fn > 0 else 0
     f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
-    precicsion_arr.append(precision)
+    precision_arr.append(precision)
     recall_arr.append(recall)
     f1_score_arr.append(f1_score)
-  precision_mean = np.mean(precicsion_arr)
+  precision_mean = np.mean(precision_arr)
   recall_mean = np.mean(recall_arr)
   f1_score_mean = np.mean(f1_score_arr)
   return {'precision:': precision_mean, 'recall:': recall_mean, 'F1_Score': f1_score_mean}
 
-def calc_hit_rate_LLM(cleaned_LLM_recs,retriver_out,k):
+def calc_hit_rate_LLM(cleaned_LLM_recs, retriever_output, k):
+  #Input: Cleaned LLM recs, retriever output, k
+  #Output: Hit rate@k
   sum = 0
   for i,rec in enumerate(cleaned_LLM_recs):
     predicted_results = ast.literal_eval(rec)[:k]
-    ground_truth = retriver_out[i]['user vector'].splitlines()
+    ground_truth = retriever_output[i]['user vector'].splitlines()
     tp = len(set(predicted_results) & set(ground_truth))
     if tp > 0:
       sum += 1
   return sum/len(cleaned_LLM_recs)
 
-def calc_hit_ratek_LLM(cleaned_LLM_recs, retriver_output,k_arr):
+def calc_hit_ratek_LLM(cleaned_LLM_recs, retriever_output, k_arr):
+  #Input: Cleaned LLM recs, retriever output, array of k values
+  #Output: Dictionary of hit rate@k
   hit_rate_k = defaultdict(float)
   for k in k_arr:
-    hit_rate_k[k] = calc_hit_rate_LLM(cleaned_LLM_recs,retriver_output,k)
+    hit_rate_k[k] = calc_hit_rate_LLM(cleaned_LLM_recs, retriever_output, k)
   return hit_rate_k
 
-def calc_hit_rate_RAG(retriver_output,k):
+def calc_hit_rate_RAG(retriever_output, k):
+  #Input: retriever output, k
+  #Output: Hit rate@k for RAG
   sum = 0
-  for output in retriver_output:
+  for output in retriever_output:
     ground_truth = sorted(output['user vector'].splitlines()[1:])
     rec_movies = sorted(output['similar_movies'])[:k]
     tp = len(set(ground_truth) & set(rec_movies))
     if tp > 0:
       sum += 1
-  return sum/len(retriver_output)
+  return sum/len(retriever_output)
 
-def calc_hit_ratek_RAG(retriver_output,k_arr):
+def calc_hit_ratek_RAG(retriever_output, k_arr):
+  #Input: retriever output, array of k values
+  #Output: Dictionary of hit rate@k for RAG
   hit_rate_k = defaultdict(float)
   for k in k_arr:
-    hit_rate_k[k] = calc_hit_rate_RAG(retriver_output,k)
+    hit_rate_k[k] = calc_hit_rate_RAG(retriever_output, k)
   return hit_rate_k
 
-def calc_metrics_RAG(retriver_output):
-  precicsion_arr = []
+def calc_metrics_RAG(retriever_output):
+  #Input: retriever output
+  #Output: Precision, recall, F1-score dictionary
+  precision_arr = []
   recall_arr = []
   f1_score_arr = []
-  for output in retriver_output:
+  for output in retriever_output:
     movie_lines = output['user vector'].splitlines()[1:]
     num_movies = len(movie_lines)
     if num_movies < 20:
@@ -204,10 +243,10 @@ def calc_metrics_RAG(retriver_output):
     precision = tp / (tp + fp) if tp + fp > 0 else 0
     recall = tp / (tp + fn) if tp + fn > 0 else 0
     f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
-    precicsion_arr.append(precision)
+    precision_arr.append(precision)
     recall_arr.append(recall)
     f1_score_arr.append(f1_score)
-  precision_mean = np.mean(precicsion_arr)
+  precision_mean = np.mean(precision_arr)
   recall_mean = np.mean(recall_arr)
   f1_score_mean = np.mean(f1_score_arr)
   return {'precision:': precision_mean, 'recall:': recall_mean, 'F1_Score': f1_score_mean}
